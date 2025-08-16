@@ -198,6 +198,46 @@ for field_key in career_map:
 # Ensure unique roles, sorted by length (desc) for better matching in find_role_in_input
 all_roles = sorted(list(set(all_roles_list)), key=len, reverse=True)
 
+# --- Area of Interest Extraction Helper ---
+def extract_area_of_interest(user_input, field):
+  """
+  Extracts the area of interest (subfield) from user input for a given field.
+  Uses case-insensitive and partial matching.
+  Returns the matched subfield key or None.
+  """
+  print(f"Debug extract_area_of_interest: user_input='{user_input}', field='{field}'")
+  
+  if not field or field not in career_map:
+    print(f"Debug: Field '{field}' not found in career_map")
+    return None
+    
+  subfields = list(career_map[field].keys())
+  user_input_lower = user_input.lower()
+  
+  print(f"Debug: Available subfields for '{field}': {subfields}")
+  print(f"Debug: Looking for match with '{user_input_lower}'")
+  
+  # Try exact match (case-insensitive)
+  for subfield in subfields:
+    if subfield.lower() == user_input_lower:
+      print(f"Debug: Exact match found: '{subfield}'")
+      return subfield
+      
+  # Try partial match (subfield in user input)
+  for subfield in subfields:
+    if re.search(r'\b' + re.escape(subfield.lower()) + r'\b', user_input_lower):
+      print(f"Debug: Partial match found: '{subfield}'")
+      return subfield
+      
+  # Try if user input is contained in subfield
+  for subfield in subfields:
+    if user_input_lower in subfield.lower():
+      print(f"Debug: Contained match found: '{subfield}'")
+      return subfield
+      
+  print("Debug: No match found")
+  return None
+
 # General question templates for roles (used with NLP intent)
 specific_role_questions = {
     "get_skills": "To succeed as a {role}, you'll typically need proficiency in {skills}. Key skills include {specific_skills}.",
@@ -1236,6 +1276,8 @@ role_details = {
 def simulate_typing_delay():
     time.sleep(0.5)
 
+# Duplicate function removed - using the one defined earlier in the file
+
 # Function to find a role mentioned in the user's input
 def find_role_in_input(user_input):
     user_input_lower = user_input.lower()
@@ -1264,6 +1306,7 @@ def ask():
     current_interest = data.get('interest')
 
     print(f"Received: message='{user_input_raw}', field='{current_field}', interest='{current_interest}'")
+    print(f"Debug: user_input_raw type: {type(user_input_raw)}, current_field type: {type(current_field)}")
 
     response_answer = "I'm sorry, I couldn't understand your input. Could you please clarify or choose from the options?"
     response_choices = None # Default to no choices
@@ -1271,8 +1314,15 @@ def ask():
     # Predict intent using the loaded NLP model
     predicted_intent = None
     if nlp_model:
-        predicted_intent = nlp_model.predict([user_input_raw])[0]
-        print(f"Predicted Intent: {predicted_intent}")
+        try:
+            predicted_intent = nlp_model.predict([user_input_raw])[0]
+            print(f"Predicted Intent: {predicted_intent}")
+        except Exception as e:
+            print(f"Error predicting intent: {e}")
+            predicted_intent = "fallback"
+    else:
+        print("NLP model not loaded, using fallback intent")
+        predicted_intent = "fallback"
 
     # --- Conversation Flow Logic ---
 
@@ -1306,14 +1356,7 @@ def ask():
         return jsonify({"answer": response_answer, "choices": response_choices})
 
 
-    # PRIORITY 2: Handle Greetings (NLP-driven)
-    if predicted_intent == "greet":
-        response_answer = "Hey there! I'm here to help you explore career paths. What field are you interested in?"
-        response_choices = list(career_map.keys()) # Provide main field options
-        simulate_typing_delay()
-        return jsonify({"answer": response_answer, "choices": response_choices})
-
-    # PRIORITY 3: Handle User Selecting a Main Field (from button click or direct text match)
+    # PRIORITY 2: Handle User Selecting a Main Field (from button click or direct text match)
     # This condition also covers direct text input like "science" if current_field is None
     if user_input_raw in career_map and not current_field:
         response_answer = f"Great! Within {user_input_raw.capitalize()}, what specific area are you interested in? You can choose from: {', '.join([s.capitalize() for s in career_map[user_input_raw]])}."
@@ -1321,19 +1364,27 @@ def ask():
         simulate_typing_delay()
         return jsonify({"answer": response_answer, "choices": response_choices})
     
-
-    # PRIORITY 4: Handle User Selecting an Interest (subfield) within an already chosen main field
+    # PRIORITY 3: Handle User Selecting an Interest (subfield) within an already chosen main field
     # This handles button clicks for interests or direct text input if current_interest is None
-    if current_field and current_field in career_map:
-        if user_input_raw in career_map[current_field] and not current_interest:
-            suggested_careers = career_map[current_field][user_input_raw]
-            response_answer = f"For {user_input_raw.capitalize()} within {current_field.capitalize()}, you might consider careers like: {', '.join(suggested_careers)}. Is there a specific role you'd like to know more about, or do you have another question?"
+    # This should come BEFORE the greet check to avoid NLP misclassification issues
+    if current_field and current_field in career_map and not current_interest:
+        # Use robust extraction for area of interest
+        matched_interest = extract_area_of_interest(user_input_raw, current_field)
+        print(f"Debug: matched_interest='{matched_interest}', current_interest='{current_interest}'")
+        
+        if matched_interest:
+            suggested_careers = career_map[current_field][matched_interest]
+            response_answer = f"For {matched_interest.capitalize()} within {current_field.capitalize()}, you might consider careers like: {', '.join(suggested_careers)}. Is there a specific role you'd like to know more about, or do you have another question?"
             response_choices = None # No choices here; user types a role or question
             simulate_typing_delay()
             return jsonify({"answer": response_answer, "choices": response_choices})
-        # If current_field is set, but user input is not a recognized interest or a role,
-        # it might still fall through to a fallback, but at least we tried to use context.
 
+    # PRIORITY 4: Handle Greetings (NLP-driven)
+    if predicted_intent == "greet":
+        response_answer = "Hey there! I'm here to help you explore career paths. What field are you interested in?"
+        response_choices = list(career_map.keys()) # Provide main field options
+        simulate_typing_delay()
+        return jsonify({"answer": response_answer, "choices": response_choices})
 
     # FINAL FALLBACK: For unhandled inputs, unknown intents, or when no specific field/interest/role is determined
     # If the predicted intent is 'fallback' from NLP, or if no context was built yet.

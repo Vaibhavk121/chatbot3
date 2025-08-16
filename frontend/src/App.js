@@ -163,14 +163,40 @@ function App() {
   };
 
   const handleInterestSelection = (selectedInterest) => {
-    setCurrentInterest(selectedInterest); // Set the current interest
-    setShowInterestOptions(false); // Hide interest options immediately
+      setCurrentInterest(selectedInterest); // Set the current interest
+      setShowInterestOptions(false); // Hide interest options immediately
 
-    // Add user's selected interest to messages
-    setMessages((prev) => [...prev, { sender: "user", text: capitalizeFirstLetter(selectedInterest) }]);
+      // Add user's selected interest to messages
+      setMessages((prev) => [...prev, { sender: "user", text: capitalizeFirstLetter(selectedInterest) }]);
 
-    // Trigger bot's response for the selected interest
-    sendMessage(selectedInterest, false); // false: Don't add to messages again
+      // Trigger bot's response for the selected interest, always passing the current field
+      sendMessageWithField(selectedInterest, currentField);
+    };
+
+    // Helper to always send the correct field context for interests
+    const sendMessageWithField = async (interest, field) => {
+      try {
+        console.log(`Sending interest: ${interest}, field: ${field}`); // Debug log
+        const res = await axios.post("http://127.0.0.1:5000/ask", {
+          message: interest,
+          field: field,
+          interest: null // Always null, as we're selecting a new interest
+        });
+        const botResponse = res.data.answer;
+        const botChoices = res.data.choices;
+        simulateTypingEffect(botResponse, () => {
+          // Hide all option menus after interest selection
+          setShowInterestOptions(false);
+          setShowFieldOptions(false);
+        });
+      } catch (error) {
+        console.error("Error sending message:", error);
+        setMessages((prev) => [
+          ...prev,
+          { sender: "bot", text: "Oops! Something went wrong. Please try again." },
+        ]);
+        setIsTyping(false);
+      }
   };
 
   const resetConversation = () => {
